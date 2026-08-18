@@ -1,0 +1,18 @@
+{
+  "name": "BTC Scalper",
+  "short_name": "BTC Scalper",
+  "description": "High-confidence BTCUSD 15m scalping signals",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/next.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
