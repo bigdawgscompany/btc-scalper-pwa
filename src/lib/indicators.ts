@@ -70,24 +70,75 @@ export function stochastic(
   return { k, d };
 }
 
+/** Exponential moving average series (all values) */
+export function emaSeries(values: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length < period) return result;
+
+  const k = 2 / (period + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += values[i];
+  }
+  let prevEma = sum / period;
+  result[period - 1] = prevEma;
+
+  for (let i = period; i < values.length; i++) {
+    prevEma = values[i] * k + prevEma * (1 - k);
+    result[i] = prevEma;
+  }
+  return result;
+}
+
+/** Complete MACD calculation */
+export function macd(
+  closes: number[],
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9
+): {
+  macdLine: number | null;
+  signalLine: number | null;
+  histogram: number | null;
+} {
+  if (closes.length < slowPeriod + signalPeriod) {
+    return { macdLine: null, signalLine: null, histogram: null };
+  }
+
+  const fastEma = emaSeries(closes, fastPeriod);
+  const slowEma = emaSeries(closes, slowPeriod);
+
+  const macdLineSeries: number[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    const f = fastEma[i];
+    const s = slowEma[i];
+    if (f !== null && s !== null) {
+      macdLineSeries.push(f - s);
+    }
+  }
+
+  if (macdLineSeries.length < signalPeriod) {
+    return { macdLine: null, signalLine: null, histogram: null };
+  }
+
+  const signalLineSeries = emaSeries(macdLineSeries, signalPeriod);
+  const lastMacd = macdLineSeries[macdLineSeries.length - 1];
+  const lastSignal = signalLineSeries[signalLineSeries.length - 1];
+
+  if (lastMacd === undefined || lastSignal === null) {
+    return { macdLine: null, signalLine: null, histogram: null };
+  }
+
+  return {
+    macdLine: lastMacd,
+    signalLine: lastSignal,
+    histogram: lastMacd - lastSignal,
+  };
+}
+
 /** MACD histogram (12, 26, 9) */
 export function macdHistogram(closes: number[]): number | null {
-  if (closes.length < 35) return null; // enough for stable EMA
-  const ema12 = ema(closes, 12);
-  const ema26 = ema(closes, 26);
-  if (ema12 === null || ema26 === null) return null;
-  const macdLine = ema12 - ema26;
-
-  // Approximate signal line by building MACD series then EMA9
-  const macdSeries: number[] = [];
-  for (let i = 26; i <= closes.length; i++) {
-    const e12 = ema(closes.slice(0, i), 12);
-    const e26 = ema(closes.slice(0, i), 26);
-    if (e12 !== null && e26 !== null) macdSeries.push(e12 - e26);
-  }
-  const signal = ema(macdSeries, 9);
-  if (signal === null) return null;
-  return macdLine - signal;
+  return macd(closes).histogram;
 }
 
 /** Commodity Channel Index */

@@ -17,7 +17,7 @@ export type OscillatorValues = {
   willR: number | null;
 };
 
-export type SignalDirection = "BUY" | "SELL" | "LONG" | "NEUTRAL";
+export type SignalDirection = "BUY" | "SELL" | "LONG" | "SHORT" | "NEUTRAL";
 
 export type SignalResult = {
   direction: SignalDirection;
@@ -26,6 +26,15 @@ export type SignalResult = {
   reasons: string[];
   timestamp: number;
   price: number;
+};
+
+export type SignalHistoryItem = {
+  id: string;
+  timestamp: number;
+  price: number;
+  direction: SignalDirection;
+  confidence: number;
+  source: string;
 };
 
 export type ConfidenceConfig = {

@@ -73,16 +73,16 @@ export function computeSignal(
     }
   }
 
-  // MACD histogram
+  // MACD histogram - require minimum momentum threshold to prevent noise
   if (oscillators.macdHist !== null) {
-    if (oscillators.macdHist > 0) {
-      bullish += 0.7;
-      strength += Math.min(Math.abs(oscillators.macdHist) / 50, 1);
-      reasons.push(`MACD hist positive (${oscillators.macdHist.toFixed(2)})`);
-    } else if (oscillators.macdHist < 0) {
-      bearish += 0.7;
-      strength += Math.min(Math.abs(oscillators.macdHist) / 50, 1);
-      reasons.push(`MACD hist negative (${oscillators.macdHist.toFixed(2)})`);
+    if (oscillators.macdHist >= 1.0) {
+      bullish += 1;
+      strength += Math.min(Math.abs(oscillators.macdHist) / 40, 1);
+      reasons.push(`MACD bullish momentum (${oscillators.macdHist.toFixed(2)})`);
+    } else if (oscillators.macdHist <= -1.0) {
+      bearish += 1;
+      strength += Math.min(Math.abs(oscillators.macdHist) / 40, 1);
+      reasons.push(`MACD bearish momentum (${oscillators.macdHist.toFixed(2)})`);
     }
   }
 
@@ -116,11 +116,11 @@ export function computeSignal(
   const net = bullish - bearish;
   const confirmations = Math.max(bullish, bearish);
 
-  // Confidence: combination of alignment and magnitude
+  // Confidence: combination of alignment, magnitude, and number of confirmations
   let confidence = 0;
   if (totalVotes > 0) {
     const alignment = Math.abs(net) / totalVotes;
-    confidence = Math.min(100, Math.round(alignment * 60 + strength * 25 + confirmations * 8));
+    confidence = Math.min(100, Math.round(alignment * 55 + strength * 25 + confirmations * 10));
   }
 
   let direction: SignalDirection = "NEUTRAL";
@@ -132,11 +132,11 @@ export function computeSignal(
     if (net > 0) {
       direction = confidence >= 85 ? "LONG" : "BUY";
     } else if (net < 0) {
-      direction = "SELL";
+      direction = confidence >= 85 ? "SHORT" : "SELL";
     }
   } else {
     reasons.push(
-      `Insufficient confidence (${confidence}) or confirmations (${confirmations.toFixed(1)})`
+      `Insufficient confidence (${confidence}%) or confirmations (${confirmations.toFixed(1)}/${config.minConfirmations})`
     );
   }
 

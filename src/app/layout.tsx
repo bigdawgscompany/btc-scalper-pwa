@@ -17,10 +17,21 @@ export const metadata: Metadata = {
   description:
     "Personal experimental PWA for high-confidence BTCUSD 15-minute scalping signals using oscillator matrix. Not financial advice.",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "BTC Scalper",
+  },
+  openGraph: {
+    title: "BTC Scalper – High-Confidence 15m Signals",
+    description:
+      "Real-time BTCUSD 15m oscillator matrix and high-confidence scalping signals.",
+    type: "website",
+    siteName: "BTC Scalper",
   },
 };
 
@@ -40,9 +51,15 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-950">{children}</body>
+      <head>
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/icon.svg" />
+      </head>
+      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100 selection:bg-amber-500/20 selection:text-amber-200 font-sans">
+        {children}
+      </body>
     </html>
   );
 }
