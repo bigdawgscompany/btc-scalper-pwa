@@ -11,17 +11,66 @@ import type {
 export const REQUIRED_CANDLE_COUNT = 100;
 
 /**
- * Compute Strategy Analysis according to exact 4-group ternary voting rules.
+ * Pure core of the 4-group ternary voting rules (§5). Given exactly four
+ * votes (each -1, 0, or +1), computes the signal state, score, supporters,
+ * and opponents. This is extracted so all 81 combinations are unit-testable.
  *
  * Rules:
+ * signalScore = 25 * abs(sum(votes))
+ * Bullish: sumVotes >= 3 AND supporters >= 3 AND score >= 75
+ * Bearish: sumVotes <= -3 AND supporters >= 3 AND score >= 75
+ * Otherwise: Wait
+ */
+export function computeSignalFromVotes(votes: [
+  VoteValue,
+  VoteValue,
+  VoteValue,
+  VoteValue
+]): {
+  state: SignalState;
+  score: number;
+  sumVotes: number;
+  supporters: number;
+  opponents: number;
+} {
+  const sumVotes = votes[0] + votes[1] + votes[2] + votes[3];
+  const score = 25 * Math.abs(sumVotes);
+
+  const bullishVotes = votes.filter((v) => v === 1).length;
+  const bearishVotes = votes.filter((v) => v === -1).length;
+
+  let supporters = 0;
+  let opponents = 0;
+  if (sumVotes > 0) {
+    supporters = bullishVotes;
+    opponents = bearishVotes;
+  } else if (sumVotes < 0) {
+    supporters = bearishVotes;
+    opponents = bullishVotes;
+  } else {
+    supporters = Math.max(bullishVotes, bearishVotes);
+    opponents = Math.min(bullishVotes, bearishVotes);
+  }
+
+  let state: SignalState = "Wait";
+  if (sumVotes >= 3 && supporters >= 3 && score >= 75) {
+    state = "Bullish";
+  } else if (sumVotes <= -3 && supporters >= 3 && score >= 75) {
+    state = "Bearish";
+  }
+
+  return { state, score, sumVotes, supporters, opponents };
+}
+
+/**
+ * Compute Strategy Analysis according to exact 4-group ternary voting rules.
+ *
  * Group 1: RSI (14) - <=30 Bullish (+1), >=70 Bearish (-1), else Neutral (0)
  * Group 2: CCI (20) - <-100 Bullish (+1), >100 Bearish (-1), else Neutral (0)
  * Group 3: MACD (12,26,9) Hist - > eps Bullish (+1), < -eps Bearish (-1), else Neutral (0)
  * Group 4: Stoch (14,3) & Will%R (14) - K,D < 20 & Will <= -80 Bullish (+1); K,D > 80 & Will >= -20 Bearish (-1); else Neutral (0)
  *
- * signalScore = 25 * abs(sum(votes))
- * Confirmed Bullish/Bearish requires >= 3 supporters AND score >= 75 (sumVotes >= 3 or <= -3).
- * Otherwise Wait. Missing/insufficient candles (<100) returns Unavailable.
+ * Missing/insufficient candles (<100) returns Unavailable.
  */
 export function analyzeCandles(
   candles: Candle[],
@@ -163,40 +212,20 @@ export function analyzeCandles(
     reason: stochWillReason,
   });
 
-  const sumVotes = rsiVote + cciVote + macdVote + stochWillVote;
-  const score = 25 * Math.abs(sumVotes);
+  const votes: [VoteValue, VoteValue, VoteValue, VoteValue] = [
+    rsiVote,
+    cciVote,
+    macdVote,
+    stochWillVote,
+  ];
+  const { state, score, sumVotes, supporters, opponents } =
+    computeSignalFromVotes(votes);
 
-  const bullishVotes = [rsiVote, cciVote, macdVote, stochWillVote].filter(
-    (v) => v === 1
-  ).length;
-  const bearishVotes = [rsiVote, cciVote, macdVote, stochWillVote].filter(
-    (v) => v === -1
-  ).length;
-
-  let supporters = 0;
-  let opponents = 0;
-  if (sumVotes > 0) {
-    supporters = bullishVotes;
-    opponents = bearishVotes;
-  } else if (sumVotes < 0) {
-    supporters = bearishVotes;
-    opponents = bullishVotes;
-  } else {
-    supporters = Math.max(bullishVotes, bearishVotes);
-    opponents = Math.min(bullishVotes, bearishVotes);
-  }
-
-  let state: SignalState = "Wait";
   const reasons: string[] = groupContributions
     .filter((g) => g.vote !== 0)
     .map((g) => g.reason);
 
-  if (sumVotes >= 3 && supporters >= 3 && score >= 75) {
-    state = "Bullish";
-  } else if (sumVotes <= -3 && supporters >= 3 && score >= 75) {
-    state = "Bearish";
-  } else {
-    state = "Wait";
+  if (state === "Wait") {
     if (reasons.length === 0) {
       reasons.push("All oscillator groups currently in neutral range.");
     } else {

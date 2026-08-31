@@ -753,7 +753,7 @@ function SettingsView({ paper }: { paper: ReturnType<typeof usePaper> }) {
 // ─── Root Terminal Shell ──────────────────────────────────────────────
 export function Terminal() {
   const market = useMarket();
-  const paper = usePaper(market.marketData);
+  const paper = usePaper(market.marketData, market.isEligible, market.marketState);
   const [activeView, setActiveView] = useState<View>("market");
 
   const isReadonly = paper.lockStatus === "SECONDARY_READONLY" || paper.lockStatus === "UNSUPPORTED";

@@ -218,7 +218,7 @@ describe("analyzeCandles", () => {
     const candles = makeCandles(REQUIRED_CANDLE_COUNT);
     const result = analyzeCandles(candles);
     if (result.state === "Bearish") {
-      expect(result.sumVotes).toBeLessThanOrEqualTo(-3);
+      expect(result.sumVotes).toBeLessThanOrEqual(-3);
       expect(result.score).toBeGreaterThanOrEqual(75);
     }
   });

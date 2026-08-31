@@ -58,7 +58,7 @@ export function validateSingleCandle(
 
 /**
  * Validate a series of candles ensuring:
- * 1. Strict chronology (sorted ascending).
+ * 1. Strict ascending chronology (REJECT reversed order — no silent sort).
  * 2. No gaps between consecutive 15m intervals.
  * 3. No duplicate timestamps.
  * 4. No future timestamps beyond reasonable clock skew.
@@ -75,12 +75,9 @@ export function validateCandleSeries(
     throw new ValidationError("Candle series is empty or not an array.");
   }
 
-  // 1. Sort ascending by openTime
-  const sorted = [...candles].sort((a, b) => a.openTime - b.openTime);
-
-  // 2. Validate chronology & contiguous intervals
-  for (let i = 0; i < sorted.length; i++) {
-    const current = sorted[i];
+  // 1. Validate strict ascending chronology — REJECT reversed order (no sort)
+  for (let i = 0; i < candles.length; i++) {
+    const current = candles[i];
 
     // Check future candle with 60s clock skew tolerance
     if (current.openTime > observationTimestamp + 60_000) {
@@ -90,7 +87,7 @@ export function validateCandleSeries(
     }
 
     if (i > 0) {
-      const prev = sorted[i - 1];
+      const prev = candles[i - 1];
       if (current.openTime === prev.openTime) {
         throw new ValidationError(`Duplicate candle timestamp detected at ${current.openTime}`);
       }
@@ -105,21 +102,21 @@ export function validateCandleSeries(
     }
   }
 
-  // 3. Separate confirmed (closed) candles from the currently forming candle
-  const lastCandle = sorted[sorted.length - 1];
+  // 2. Separate confirmed (closed) candles from the currently forming candle
+  const lastCandle = candles[candles.length - 1];
   let formingCandle: Candle | null = null;
-  let confirmedCandles: Candle[] = sorted;
+  let confirmedCandles: Candle[] = candles;
 
   // A candle is forming if observationTimestamp is before its closeTime
   if (observationTimestamp < lastCandle.closeTime) {
     formingCandle = lastCandle;
-    confirmedCandles = sorted.slice(0, -1);
+    confirmedCandles = candles.slice(0, -1);
   }
 
   return {
     confirmedCandles,
     formingCandle,
-    allCandles: sorted,
+    allCandles: candles,
   };
 }
 
@@ -127,6 +124,7 @@ export function validateCandleSeries(
  * Verify market data freshness and eligibility:
  * - Allow at most 60s provider lag immediately after boundary.
  * - Eligibility expires at most 16 minutes after candle close.
+ * - May end earlier when the expected interval is missing.
  */
 export function checkFreshnessAndEligibility(
   confirmedCandleTime: number,
@@ -154,4 +152,39 @@ export function checkFreshnessAndEligibility(
     lagSeconds,
     expiresAt,
   };
+}
+
+// ─── Boundary-race protection (§4) ──────────────────────────────────────
+
+/**
+ * Returns the current 15-minute interval boundary (ms) for a given timestamp.
+ */
+export function currentIntervalBoundary(timestamp: number): number {
+  return Math.floor(timestamp / INTERVAL_MS) * INTERVAL_MS;
+}
+
+/**
+ * Detects whether a request/validation spans a relevant interval boundary
+ * between two timestamps. A forming candle fetched before its close must not
+ * become confirmed merely because local time advanced.
+ */
+export function spansBoundary(
+  fetchObservationTime: number,
+  currentObservationTime: number
+): boolean {
+  return currentIntervalBoundary(fetchObservationTime) !== currentIntervalBoundary(currentObservationTime);
+}
+
+/**
+ * Determines if the expected next candle is missing (gap at the head of the
+ * series), which should cause early eligibility expiry.
+ */
+export function isExpectedIntervalMissing(
+  lastCandle: Candle,
+  observationTimestamp: number
+): boolean {
+  const expectedNextOpen = lastCandle.openTime + INTERVAL_MS;
+  // If we're past the expected next candle's open and it hasn't appeared,
+  // the expected interval is missing.
+  return observationTimestamp >= expectedNextOpen && lastCandle.closeTime < observationTimestamp;
 }

@@ -30,8 +30,10 @@ export function createInitialAccount(
     isRunning: false,
     isPaused: false,
     lastCandleEvaluated: 0,
+    lastStrategyVersionEvaluated: "",
     lastExitCandleTime: null,
     config,
+    revision: 0,
     updatedAt: Date.now(),
   };
 }
@@ -358,6 +360,8 @@ export function closePosition(
  * 1. Stop / Target checks on active position.
  * 2. Opposite confirmed signal reversal / exit.
  * 3. New entry (if flat, not on same candle as exit, and confirmed Bullish/Bearish).
+ *
+ * Validates quote age (≤15s) and deduplicates by (strategyVersion, confirmed candle).
  */
 export function evaluateAutopilotCycle(
   account: PaperAccountState,
@@ -373,6 +377,55 @@ export function evaluateAutopilotCycle(
   const candleTime = analysis.candleTime;
   const dBid = new Decimal(quote.bid);
   const dAsk = new Decimal(quote.ask);
+
+  // Quote-age validation: reject observations older than 15 seconds (§6)
+  const quoteAgeMs = Date.now() - quote.serverObservationTimestamp;
+  if (quoteAgeMs > 15_000) {
+    const decision: PaperDecision = {
+      id: decisionId,
+      timestamp: Date.now(),
+      confirmedCandleTime: candleTime,
+      strategyVersion: account.config.strategyVersion,
+      action: "HOLD",
+      reason: `Quote too old (${Math.round(quoteAgeMs / 1000)}s) — execution withheld`,
+      signalState: analysis.state,
+      signalScore: analysis.score,
+      quoteBid: quote.bid.toString(),
+      quoteAsk: quote.ask.toString(),
+    };
+    return {
+      updatedAccount: { ...account, lastCandleEvaluated: candleTime },
+      decision,
+      fills: [],
+      closedTrade: null,
+    };
+  }
+
+  // Decision dedup: skip if this candle already evaluated with same strategy version (§6)
+  if (
+    account.lastCandleEvaluated === candleTime &&
+    account.lastStrategyVersionEvaluated === account.config.strategyVersion &&
+    account.lastExitCandleTime !== candleTime
+  ) {
+    const decision: PaperDecision = {
+      id: decisionId,
+      timestamp: Date.now(),
+      confirmedCandleTime: candleTime,
+      strategyVersion: account.config.strategyVersion,
+      action: "HOLD",
+      reason: `Candle ${candleTime} already evaluated — deduplicated`,
+      signalState: analysis.state,
+      signalScore: analysis.score,
+      quoteBid: quote.bid.toString(),
+      quoteAsk: quote.ask.toString(),
+    };
+    return {
+      updatedAccount: account,
+      decision,
+      fills: [],
+      closedTrade: null,
+    };
+  }
 
   let currentAccount = updateAccountMarkEquity(account, quote.bid, quote.ask);
   const fills: PaperFill[] = [];
@@ -418,11 +471,13 @@ export function evaluateAutopilotCycle(
         quoteAsk: quote.ask.toString(),
       };
 
+      const updatedAccountWithEval = {
+        ...currentAccount,
+        lastCandleEvaluated: candleTime,
+        lastStrategyVersionEvaluated: currentAccount.config.strategyVersion,
+      };
       return {
-        updatedAccount: {
-          ...currentAccount,
-          lastCandleEvaluated: candleTime,
-        },
+        updatedAccount: updatedAccountWithEval,
         decision,
         fills,
         closedTrade,

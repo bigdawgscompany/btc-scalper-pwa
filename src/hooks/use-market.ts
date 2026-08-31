@@ -2,18 +2,36 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { MarketResponseSchema, type MarketResponse, type Candle } from "@/lib/contracts";
+import {
+  validateMarketResponse,
+  isEligibleForExecution,
+} from "@/lib/browser-market";
 
 export type ChartRange = "6h" | "24h" | "7d";
 
+/**
+ * Market data state machine (§2): loading → waiting → fresh → stale →
+ * disconnected → unavailable → paused.
+ */
+export type MarketState =
+  | "loading"
+  | "waiting"
+  | "fresh"
+  | "stale"
+  | "disconnected"
+  | "unavailable";
+
 export function useMarket() {
   const [data, setData] = useState<MarketResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [marketState, setMarketState] = useState<MarketState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [chartRange, setChartRange] = useState<ChartRange>("24h");
   const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Monotonic guard: reject older responses that arrive out of order (§4)
+  const lastResponseTimestampRef = useRef<number>(0);
 
   const fetchMarketData = useCallback(async () => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
@@ -39,31 +57,67 @@ export function useMarket() {
       const json = await res.json();
       const validated = MarketResponseSchema.parse(json);
 
+      // Reject older responses that arrive after a newer one (§4)
+      if (
+        lastResponseTimestampRef.current > 0 &&
+        validated.generatedTimestamp < lastResponseTimestampRef.current
+      ) {
+        return;
+      }
+      lastResponseTimestampRef.current = validated.generatedTimestamp;
+
+      // Browser-side re-validation (§4)
+      const browserValidation = validateMarketResponse(validated);
+      if (!browserValidation.valid) {
+        setError(`Browser validation failed: ${browserValidation.errors.join("; ")}`);
+        setMarketState("unavailable");
+        return;
+      }
+
       setData(validated);
       setError(null);
       setLastFetchTime(Date.now());
+
+      // Determine state from freshness/eligibility
+      const eligibility = isEligibleForExecution(validated);
+      if (eligibility.eligible) {
+        setMarketState("fresh");
+      } else if (!isOnline) {
+        setMarketState("disconnected");
+      } else if (validated.status.isLagging) {
+        setMarketState("stale");
+      } else {
+        setMarketState("unavailable");
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") {
         return;
       }
-      setError(err instanceof Error ? err.message : "Unknown market error");
-    } finally {
-      setLoading(false);
+      if (!isOnline) {
+        setMarketState("disconnected");
+        setError("Network offline. Retaining historical view-only data.");
+      } else {
+        setMarketState("unavailable");
+        setError(err instanceof Error ? err.message : "Unknown market error");
+      }
     }
-  }, []);
+  }, [isOnline]);
 
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
+      setMarketState("waiting");
       fetchMarketData();
     };
     const handleOffline = () => {
       setIsOnline(false);
+      setMarketState("disconnected");
       setError("Network offline. Retaining historical view-only data.");
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
+        // Immediately withdraw execution eligibility on hide (§4)
         fetchMarketData();
       } else {
         if (abortControllerRef.current) {
@@ -79,7 +133,7 @@ export function useMarket() {
     // Defer initial fetch to avoid setState in effect body
     const initTimer = setTimeout(() => void fetchMarketData(), 0);
 
-    // 15s visibility-aware polling
+    // 15s visibility-aware polling (§4)
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
         fetchMarketData();
@@ -99,7 +153,7 @@ export function useMarket() {
   }, [fetchMarketData]);
 
   // Filter candles based on chosen chartRange (6h: 24 candles, 24h: 96 candles, 7d: 672 candles)
-  const getFilteredCandles = useCallback((): Candle[] => {
+  const getFilteredCandles = useCallback( (): Candle[] => {
     if (!data || !data.candles) return [];
     let count = 96; // 24h default
     if (chartRange === "6h") count = 24;
@@ -107,11 +161,16 @@ export function useMarket() {
     return data.candles.slice(-count);
   }, [data, chartRange]);
 
+  // Synchronous eligibility guard for the paper controller (§4)
+  const isEligible = data ? isEligibleForExecution(data).eligible : false;
+
   return {
     marketData: data,
-    loading,
+    marketState,
+    loading: marketState === "loading" || marketState === "waiting",
     error,
     isOnline,
+    isEligible,
     chartRange,
     setChartRange,
     filteredCandles: getFilteredCandles(),

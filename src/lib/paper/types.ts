@@ -106,7 +106,9 @@ export type PaperAccountState = {
   isRunning: boolean;
   isPaused: boolean;
   lastCandleEvaluated: number;
+  lastStrategyVersionEvaluated: string; // for decision dedup (§6)
   lastExitCandleTime: number | null; // blocks same-candle re-entry
   config: PaperConfig;
+  revision: number; // concurrency/revision counter (§6)
   updatedAt: number;
 };

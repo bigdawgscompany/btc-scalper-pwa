@@ -11,6 +11,10 @@ import {
   TimeoutError,
 } from "./errors";
 
+// ─── Spec-compliant provider transport (§4) ─────────────────────────────
+// Binance ONLY. data-api.binance.vision first, api.binance.com second.
+// No silent exchange/instrument changes, no third-party fallbacks.
+
 const BINANCE_CANDLE_ENDPOINTS = [
   "https://data-api.binance.vision/api/v3/klines",
   "https://api.binance.com/api/v3/klines",
@@ -21,33 +25,40 @@ const BINANCE_QUOTE_ENDPOINTS = [
   "https://api.binance.com/api/v3/ticker/bookTicker",
 ];
 
-// Fallback endpoints for regions with Binance IP restrictions (e.g. US cloud instances)
-const FALLBACK_CANDLE_ENDPOINTS = [
-  "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=900",
-  "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=15",
-];
-
-const FALLBACK_QUOTE_ENDPOINTS = [
-  "https://api.exchange.coinbase.com/products/BTC-USD/ticker",
-  "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
-];
+const DEADLINE_MS = 4000;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024; // 8 MB response-size cap
+const RATE_LIMIT_COOLDOWN_MS = 1000; // bounded 429 cooldown
+const MAX_ATTEMPTS = 2;
 
 type CachedCandleData = {
   candles: Candle[];
   source: string;
-  timestamp: number;
+  observationTime: number;
 };
 
 let candleCache: CachedCandleData | null = null;
 let inflightCandlePromise: Promise<CachedCandleData> | null = null;
-const CACHE_TTL_MS = 15_000; // 15s
+const CACHE_TTL_MS = 15_000; // 15s validated-candle cache
 
-async function fetchWithDeadline(
+/**
+ * Sleep helper for bounded cooldowns.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch JSON with a hard deadline covering BOTH the response headers AND
+ * the body read (prevents hanging bodies from bypassing the deadline).
+ * Enforces a response-size cap and bounded 429 cooldown.
+ */
+async function fetchJsonWithDeadline(
   url: string,
-  timeoutMs = 4000
-): Promise<Response> {
+  deadlineMs = DEADLINE_MS
+): Promise<unknown> {
+  const start = Date.now();
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), deadlineMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
@@ -57,42 +68,70 @@ async function fetchWithDeadline(
       },
       cache: "no-store",
     });
-    return res;
+
+    if (res.status === 429) {
+      throw new RateLimitError("Binance rate limit hit");
+    }
+    if (!res.ok) {
+      throw new ProviderUnavailableError(`HTTP ${res.status} from ${url}`);
+    }
+
+    // Best-effort size check via Content-Length header
+    const contentLength = res.headers.get("content-length");
+    if (contentLength && Number(contentLength) > MAX_RESPONSE_BYTES) {
+      throw new ProviderUnavailableError(`Response too large from ${url}`);
+    }
+
+    // Read body within the remaining deadline (covers hanging bodies)
+    const elapsed = Date.now() - start;
+    const remaining = Math.max(1, deadlineMs - elapsed);
+    const text = await Promise.race([
+      res.text(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new TimeoutError("Body read timed out")), remaining)
+      ),
+    ]);
+
+    // Enforce decoded size cap
+    if (text.length * 2 > MAX_RESPONSE_BYTES) {
+      throw new ProviderUnavailableError("Response exceeded maximum allowed size");
+    }
+
+    return JSON.parse(text);
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new TimeoutError(`Request to ${url} timed out after ${timeoutMs}ms`);
+      throw new TimeoutError(`Request to ${url} timed out after ${deadlineMs}ms`);
     }
     throw err;
   } finally {
-    clearTimeout(id);
+    clearTimeout(timer);
   }
 }
 
 /**
- * Fetch and validate 15m candles from Binance (with multi-endpoint failover).
+ * Fetch and validate 15m candles from Binance (exactly 2 attempts, no fallover
+ * to other exchanges). Freezes observation time at fetch for boundary-race
+ * protection.
  */
 async function fetchRawBinanceCandles(limit = 1000): Promise<{
   candles: Candle[];
   source: string;
+  observationTime: number;
 }> {
   let lastErr: Error | null = null;
 
-  for (const endpoint of BINANCE_CANDLE_ENDPOINTS) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const endpoint = BINANCE_CANDLE_ENDPOINTS[attempt];
     try {
       const url = `${endpoint}?symbol=${FIXED_INSTRUMENT}&interval=${FIXED_INTERVAL}&limit=${limit}`;
-      const res = await fetchWithDeadline(url, 4000);
+      const raw = await fetchJsonWithDeadline(url, DEADLINE_MS);
 
-      if (res.status === 429) {
-        throw new RateLimitError("Binance rate limit hit");
-      }
-      if (!res.ok) {
-        throw new ProviderUnavailableError(`HTTP ${res.status} from ${endpoint}`);
-      }
-
-      const raw = await res.json();
       if (!Array.isArray(raw) || raw.length === 0) {
         throw new ProviderUnavailableError(`Empty candle data from ${endpoint}`);
       }
+
+      // Freeze observation time immediately after successful fetch
+      const observationTime = Date.now();
 
       const parsed: Candle[] = raw.map((k: (string | number)[]) =>
         validateSingleCandle(
@@ -106,48 +145,24 @@ async function fetchRawBinanceCandles(limit = 1000): Promise<{
         )
       );
 
-      const observationTime = Date.now();
       const { allCandles } = validateCandleSeries(parsed, observationTime);
-      return { candles: allCandles, source: "Binance" };
+      return { candles: allCandles, source: "Binance", observationTime };
     } catch (err: unknown) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-    }
-  }
 
-  // Graceful fallback to Coinbase / Kraken if Binance is geo-blocked
-  for (const fallbackUrl of FALLBACK_CANDLE_ENDPOINTS) {
-    try {
-      if (fallbackUrl.includes("coinbase")) {
-        const res = await fetchWithDeadline(fallbackUrl, 4000);
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          const sorted = [...data].sort((a, b) => a[0] - b[0]);
-          const parsed: Candle[] = sorted.map((k: number[]) =>
-            validateSingleCandle(
-              k[0] * 1000,
-              Number(k[3]),
-              Number(k[2]),
-              Number(k[1]),
-              Number(k[4]),
-              Number(k[5]),
-              k[0] * 1000 + 15 * 60 * 1000 - 1
-            )
-          );
-          const { allCandles } = validateCandleSeries(parsed, Date.now());
-          return { candles: allCandles, source: "Coinbase (Fallback)" };
-        }
+      // Bounded cooldown on 429 before next attempt
+      if (err instanceof RateLimitError && attempt < MAX_ATTEMPTS - 1) {
+        await sleep(RATE_LIMIT_COOLDOWN_MS);
       }
-    } catch {
-      // try next
     }
   }
 
-  throw lastErr ?? new ProviderUnavailableError("All candle data providers failed.");
+  throw lastErr ?? new ProviderUnavailableError("All Binance candle endpoints failed.");
 }
 
 /**
  * Fetch candles with 15s in-memory caching and request coalescing.
+ * Only validated candles are cached.
  */
 export async function getMarketCandles(
   limit = 1000,
@@ -155,11 +170,11 @@ export async function getMarketCandles(
 ): Promise<{ candles: Candle[]; source: string; observationTime: number }> {
   const now = Date.now();
 
-  if (!forceFresh && candleCache && now - candleCache.timestamp < CACHE_TTL_MS) {
+  if (!forceFresh && candleCache && now - candleCache.observationTime < CACHE_TTL_MS) {
     return {
       candles: candleCache.candles,
       source: candleCache.source,
-      observationTime: candleCache.timestamp,
+      observationTime: candleCache.observationTime,
     };
   }
 
@@ -168,18 +183,14 @@ export async function getMarketCandles(
     return {
       candles: res.candles,
       source: res.source,
-      observationTime: res.timestamp,
+      observationTime: res.observationTime,
     };
   }
 
   inflightCandlePromise = (async () => {
     try {
-      const { candles, source } = await fetchRawBinanceCandles(limit);
-      const entry: CachedCandleData = {
-        candles,
-        source,
-        timestamp: Date.now(),
-      };
+      const { candles, source, observationTime } = await fetchRawBinanceCandles(limit);
+      const entry: CachedCandleData = { candles, source, observationTime };
       candleCache = entry;
       return entry;
     } finally {
@@ -191,34 +202,29 @@ export async function getMarketCandles(
   return {
     candles: result.candles,
     source: result.source,
-    observationTime: result.timestamp,
+    observationTime: result.observationTime,
   };
 }
 
 /**
  * Fetch an uncached, freshly observed executable bid/ask quote.
+ * Never cached, newly requested for each evaluation.
  */
 export async function getExecutableQuote(): Promise<QuoteResponse> {
   const requestStartTimestamp = Date.now();
   let lastErr: Error | null = null;
 
-  for (const endpoint of BINANCE_QUOTE_ENDPOINTS) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const endpoint = BINANCE_QUOTE_ENDPOINTS[attempt];
     try {
       const url = `${endpoint}?symbol=${FIXED_INSTRUMENT}`;
-      const res = await fetchWithDeadline(url, 4000);
+      const raw = await fetchJsonWithDeadline(url, DEADLINE_MS);
 
-      if (res.status === 429) {
-        throw new RateLimitError("Binance quote rate limit hit");
-      }
-      if (!res.ok) {
-        throw new ProviderUnavailableError(`HTTP ${res.status} from quote ${endpoint}`);
-      }
-
-      const raw = await res.json();
-      const bid = parseFloat(raw.bidPrice);
-      const ask = parseFloat(raw.askPrice);
-      const bidQty = parseFloat(raw.bidQty);
-      const askQty = parseFloat(raw.askQty);
+      const data = raw as Record<string, unknown>;
+      const bid = parseFloat(String(data.bidPrice));
+      const ask = parseFloat(String(data.askPrice));
+      const bidQty = parseFloat(String(data.bidQty));
+      const askQty = parseFloat(String(data.askQty));
 
       if (
         !Number.isFinite(bid) ||
@@ -245,39 +251,12 @@ export async function getExecutableQuote(): Promise<QuoteResponse> {
       };
     } catch (err: unknown) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-    }
-  }
 
-  // Fallback for quotes (e.g. Coinbase)
-  for (const fallbackUrl of FALLBACK_QUOTE_ENDPOINTS) {
-    try {
-      if (fallbackUrl.includes("coinbase")) {
-        const res = await fetchWithDeadline(fallbackUrl, 4000);
-        if (!res.ok) continue;
-        const data = await res.json();
-        const bid = parseFloat(data.bid);
-        const ask = parseFloat(data.ask);
-        // volume not used for quote fallback
-
-        if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask >= bid) {
-          return {
-            schemaVersion: 2,
-            instrument: FIXED_INSTRUMENT,
-            provider: "Coinbase (Fallback)",
-            bid,
-            ask,
-            bidQty: 1.0,
-            askQty: 1.0,
-            spread: ask - bid,
-            requestStartTimestamp,
-            serverObservationTimestamp: Date.now(),
-          };
-        }
+      if (err instanceof RateLimitError && attempt < MAX_ATTEMPTS - 1) {
+        await sleep(RATE_LIMIT_COOLDOWN_MS);
       }
-    } catch {
-      // try next
     }
   }
 
-  throw lastErr ?? new ProviderUnavailableError("All quote providers failed.");
+  throw lastErr ?? new ProviderUnavailableError("All Binance quote endpoints failed.");
 }

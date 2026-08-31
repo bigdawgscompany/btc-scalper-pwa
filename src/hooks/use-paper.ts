@@ -30,7 +30,11 @@ import {
 } from "@/lib/writer-lock";
 import { QuoteResponseSchema, type MarketResponse } from "@/lib/contracts";
 
-export function usePaper(marketData: MarketResponse | null) {
+export function usePaper(
+  marketData: MarketResponse | null,
+  isEligible: boolean,
+  marketState: string
+) {
   const [account, setAccount] = useState<PaperAccountState | null>(null);
   const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([]);
   const [equityHistory, setEquityHistory] = useState<EquityObservation[]>([]);
@@ -39,6 +43,8 @@ export function usePaper(marketData: MarketResponse | null) {
   const [error, setError] = useState<string | null>(null);
 
   const accountRef = useRef<PaperAccountState | null>(null);
+  // Pending Start cancellation support (§6)
+  const pendingStartRef = useRef<boolean>(false);
 
   // Initialize DB and request writer lock on mount
   useEffect(() => {
@@ -90,6 +96,20 @@ export function usePaper(marketData: MarketResponse | null) {
     return QuoteResponseSchema.parse(json);
   }, []);
 
+  // Pause immediately on ineligible market data (§6)
+  useEffect(() => {
+    if (!isEligible && account?.isRunning && !account?.isPaused) {
+      const paused: PaperAccountState = {
+        ...account,
+        isRunning: false,
+        isPaused: true,
+        updatedAt: Date.now(),
+      };
+      setAccount(paused); // eslint-disable-line react-hooks/set-state-in-effect
+      void saveAccount(paused);
+    }
+  }, [isEligible, account?.isRunning, account?.isPaused]);
+
   // Run single evaluation cycle
   const runEvaluation = useCallback(async () => {
     const currentAccount = accountRef.current;
@@ -105,6 +125,19 @@ export function usePaper(marketData: MarketResponse | null) {
       return;
     }
 
+    // Synchronous eligibility guard — withdraw on failure/expiry/hiding (§4)
+    if (!isEligible) {
+      const paused: PaperAccountState = {
+        ...currentAccount,
+        isRunning: false,
+        isPaused: true,
+        updatedAt: Date.now(),
+      };
+      setAccount(paused); // eslint-disable-line react-hooks/set-state-in-effect
+      await saveAccount(paused);
+      return;
+    }
+
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
       // Pause immediately on backgrounding
       const paused: PaperAccountState = {
@@ -113,7 +146,7 @@ export function usePaper(marketData: MarketResponse | null) {
         isPaused: true,
         updatedAt: Date.now(),
       };
-      setAccount(paused);
+      setAccount(paused); // eslint-disable-line react-hooks/set-state-in-effect
       await saveAccount(paused);
       return;
     }
@@ -137,6 +170,7 @@ export function usePaper(marketData: MarketResponse | null) {
       );
 
       setAccount(updatedAccount);
+      accountRef.current = updatedAccount;
 
       if (closedTrade) {
         setClosedTrades((prev) => [closedTrade, ...prev]);
@@ -145,11 +179,20 @@ export function usePaper(marketData: MarketResponse | null) {
       setEquityHistory(updatedEq);
       setError(null);
     } catch (err: unknown) {
+      // Storage failure / corrupt state → pause execution (§6)
+      const paused: PaperAccountState = {
+        ...currentAccount,
+        isRunning: false,
+        isPaused: true,
+        updatedAt: Date.now(),
+      };
+      setAccount(paused); // eslint-disable-line react-hooks/set-state-in-effect
+      accountRef.current = paused;
       setError(err instanceof Error ? err.message : "Evaluation failed.");
     } finally {
       setIsEvaluating(false);
     }
-  }, [marketData, isEvaluating, fetchExecutableQuote]);
+  }, [marketData, isEvaluating, fetchExecutableQuote, isEligible]);
 
   // Update mark price via ref to avoid setState-in-effect cascade
   useEffect(() => {
@@ -170,7 +213,7 @@ export function usePaper(marketData: MarketResponse | null) {
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [marketData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [marketData]); // eslint-disable-line react-hooks/set-state-in-effect
 
   // 5s Autopilot loop
   useEffect(() => {

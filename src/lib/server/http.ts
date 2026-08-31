@@ -26,9 +26,9 @@ export function errorResponse(
     code = error.code;
     message = error.message;
     status = error.httpStatus;
-  } else if (error instanceof Error) {
-    message = error.message;
   }
+  // Generic Errors: redact internal details — never leak stack traces or
+  // internal provider bodies (§4). Use the fallback message instead.
 
   const payload: ErrorResponse = {
     schemaVersion: 2,

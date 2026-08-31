@@ -1,18 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-  display: "swap",
-});
+import { PwaRegistration } from "@/components/pwa-registration";
 
 export const metadata: Metadata = {
   title: "BTC Scalper — Paper Research Terminal",
@@ -50,22 +40,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark`}
+      className={`${GeistSans.variable} ${GeistMono.variable} dark`}
       style={{ height: "100%", overflow: "hidden" }}
     >
-      <head>
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <script dangerouslySetInnerHTML={{
-          __html: `if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(console.error); }`
-        }} />
-      </head>
       <body
         style={{ height: "100%", overflow: "hidden", background: "#0B0E11" }}
+        className="font-sans"
       >
         <a href="#main-content" className="skip-nav">
           Skip to main content
         </a>
         {children}
+        <PwaRegistration />
       </body>
     </html>
   );
