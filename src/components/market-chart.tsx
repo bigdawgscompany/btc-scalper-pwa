@@ -146,7 +146,7 @@ export function MarketChart({ candles, formingCandleTime, chartRange, onRangeCha
   return (
     <div className="flex flex-col h-full">
       {/* Range selectors */}
-      <div className="flex items-center gap-1 px-3 py-2 flex-shrink-0" role="group" aria-label="Chart time range">
+      <div className="flex items-center gap-1 px-3 py-2 shrink-0" role="group" aria-label="Chart time range">
         {(["6h", "24h", "7d"] as ChartRange[]).map((r) => (
           <button
             key={r}
@@ -169,7 +169,7 @@ export function MarketChart({ candles, formingCandleTime, chartRange, onRangeCha
       {/* Chart canvas */}
       <div ref={containerRef} className="flex-1 w-full" />
       {/* Attribution (required by TradingView / Lightweight Charts) */}
-      <div className="flex-shrink-0 px-3 py-1">
+      <div className="shrink-0 px-3 py-1">
         <a
           href="https://www.tradingview.com/"
           target="_blank"

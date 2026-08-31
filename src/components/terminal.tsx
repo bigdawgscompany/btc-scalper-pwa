@@ -131,7 +131,7 @@ function MarketView({
   return (
     <div className="flex flex-col h-full overflow-hidden" id="main-content">
       {/* Price header */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-[#283340] flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-[#283340] shrink-0">
         <div>
           <span className="text-[10px] text-[#5A6880] uppercase tracking-widest">BTCUSDT · 15m</span>
           <div className="text-xl font-bold tabular-nums text-[#E9EEF5]">
@@ -140,7 +140,7 @@ function MarketView({
         </div>
         {loading && <div className="spinner ml-2" aria-label="Loading" />}
         {!loading && !error && <IconLive />}
-        {error && <span className="text-xs text-[#EF777D] ml-2 truncate max-w-[160px]">{error}</span>}
+        {error && <span className="text-xs text-[#EF777D] ml-2 truncate max-w-40">{error}</span>}
         {/* Confirmed signal pill */}
         <div className="ml-auto">
           <SignalBadge analysis={confirmed} />
@@ -164,7 +164,7 @@ function MarketView({
       </div>
 
       {/* Analysis inspector panel */}
-      <div className="border-t border-[#283340] flex-shrink-0 max-h-[42%] overflow-y-auto">
+      <div className="border-t border-[#283340] shrink-0 max-h-[42%] overflow-y-auto">
         {/* Confirmed Analysis */}
         {confirmed && (
           <div className="p-3">
@@ -431,7 +431,7 @@ function JournalView({ paper }: { paper: ReturnType<typeof usePaper> }) {
 
   return (
     <div className="flex flex-col h-full" id="main-content">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-[#283340] flex-shrink-0">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-[#283340] shrink-0">
         <h1 className="text-sm font-bold text-[#E9EEF5] uppercase tracking-widest">Journal</h1>
         <div className="flex gap-1 ml-auto">
           {(["ALL", "LONG", "SHORT"] as const).map((f) => (
@@ -452,7 +452,7 @@ function JournalView({ paper }: { paper: ReturnType<typeof usePaper> }) {
       </div>
 
       {/* Stats summary */}
-      <div className="grid grid-cols-4 gap-0 border-b border-[#283340] flex-shrink-0">
+      <div className="grid grid-cols-4 gap-0 border-b border-[#283340] shrink-0">
         {[
           { label: "Trades", value: filtered.length.toString() },
           { label: "Net P&L", value: `${totalNet >= 0 ? "+" : ""}${totalNet.toFixed(2)}`, color: totalNet >= 0 ? "#43D4AD" : "#EF777D" },
@@ -562,7 +562,7 @@ function SettingsView({ paper }: { paper: ReturnType<typeof usePaper> }) {
 
   return (
     <div className="flex flex-col h-full overflow-y-auto" id="main-content">
-      <div className="px-4 py-3 border-b border-[#283340] flex-shrink-0">
+      <div className="px-4 py-3 border-b border-[#283340] shrink-0">
         <h1 className="text-sm font-bold text-[#E9EEF5] uppercase tracking-widest">Settings</h1>
         {!canEdit && (
           <p className="text-xs text-[#EFBB62] mt-1">
@@ -765,7 +765,7 @@ export function Terminal() {
     >
       {/* ── Desktop nav rail ── */}
       <nav
-        className="hidden md:flex flex-col border-r border-[#283340] flex-shrink-0"
+        className="hidden md:flex flex-col border-r border-[#283340] shrink-0"
         style={{ width: "var(--nav-rail)", background: "#11161D" }}
         aria-label="Main navigation"
       >
@@ -825,7 +825,7 @@ export function Terminal() {
         aria-label={`${activeView} view`}
       >
         {/* Mobile header */}
-        <header className="flex md:hidden items-center gap-2 px-3 border-b border-[#283340] flex-shrink-0" style={{ height: "var(--header-h)", background: "#11161D" }}>
+        <header className="flex md:hidden items-center gap-2 px-3 border-b border-[#283340] shrink-0" style={{ height: "var(--header-h)", background: "#11161D" }}>
           <span className="text-[#43D4AD] font-black">₿</span>
           <span className="font-bold text-sm text-[#E9EEF5]">BTC Scalper</span>
           {market.filteredCandles.length > 0 && (
@@ -860,7 +860,7 @@ export function Terminal() {
 
         {/* Mobile bottom nav */}
         <nav
-          className="flex md:hidden border-t border-[#283340] flex-shrink-0"
+          className="flex md:hidden border-t border-[#283340] shrink-0"
           style={{ background: "#11161D" }}
           aria-label="Mobile navigation"
         >
