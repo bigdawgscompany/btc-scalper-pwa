@@ -1,20 +1,26 @@
 {
-  "name": "BTC Scalper – 15m Signal Engine",
+  "name": "BTC Scalper — Paper Research Terminal",
   "short_name": "BTC Scalper",
-  "description": "High-confidence 15-minute Bitcoin scalping signal engine and oscillator matrix",
+  "description": "Paper-only BTCUSDT 15m oscillator signal research terminal with simulated autopilot.",
   "start_url": "/",
-  "id": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
-  "orientation": "portrait-primary",
-  "categories": ["finance", "utilities"],
+  "orientation": "any",
+  "background_color": "#0B0E11",
+  "theme_color": "#0B0E11",
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["finance", "utilities"],
+  "lang": "en-US"
 }

@@ -1,33 +1,54 @@
-import type { Candle } from "./types";
+import type { Candle, IndicatorValues } from "./contracts";
 
-/** Simple moving average */
+/**
+ * Simple Moving Average over a slice of numbers.
+ */
 export function sma(values: number[], period: number): number | null {
-  if (values.length < period) return null;
+  if (values.length < period || period <= 0) return null;
   const slice = values.slice(-period);
-  return slice.reduce((a, b) => a + b, 0) / period;
+  const sum = slice.reduce((acc, val) => acc + val, 0);
+  return sum / period;
 }
 
-/** Exponential moving average (last value) */
-export function ema(values: number[], period: number): number | null {
-  if (values.length < period) return null;
+/**
+ * Exponential Moving Average Series across an array of numbers.
+ * Seeded with SMA of the first `period` elements.
+ */
+export function emaSeries(values: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length < period || period <= 0) return result;
+
   const k = 2 / (period + 1);
-  let prev = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < values.length; i++) {
-    prev = values[i] * k + prev * (1 - k);
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += values[i];
   }
-  return prev;
+  let prevEma = sum / period;
+  result[period - 1] = prevEma;
+
+  for (let i = period; i < values.length; i++) {
+    prevEma = values[i] * k + prevEma * (1 - k);
+    result[i] = prevEma;
+  }
+  return result;
 }
 
-/** RSI (Wilder) */
+/**
+ * Wilder's RSI (14 period default)
+ * Flat / zero volatility returns 50.
+ */
 export function rsi(closes: number[], period = 14): number | null {
   if (closes.length < period + 1) return null;
+
   let gains = 0;
   let losses = 0;
+
   for (let i = 1; i <= period; i++) {
     const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+    if (diff > 0) gains += diff;
+    else if (diff < 0) losses += -diff;
   }
+
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
@@ -39,12 +60,18 @@ export function rsi(closes: number[], period = 14): number | null {
     avgLoss = (avgLoss * (period - 1) + loss) / period;
   }
 
+  if (avgGain === 0 && avgLoss === 0) return 50; // flat
   if (avgLoss === 0) return 100;
+  if (avgGain === 0) return 0;
+
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
 
-/** Stochastic %K and %D */
+/**
+ * Stochastic Oscillator (%K and %D)
+ * Zero-range returns neutral %K = 50.
+ */
 export function stochastic(
   highs: number[],
   lows: number[],
@@ -70,27 +97,10 @@ export function stochastic(
   return { k, d };
 }
 
-/** Exponential moving average series (all values) */
-export function emaSeries(values: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = new Array(values.length).fill(null);
-  if (values.length < period) return result;
-
-  const k = 2 / (period + 1);
-  let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += values[i];
-  }
-  let prevEma = sum / period;
-  result[period - 1] = prevEma;
-
-  for (let i = period; i < values.length; i++) {
-    prevEma = values[i] * k + prevEma * (1 - k);
-    result[i] = prevEma;
-  }
-  return result;
-}
-
-/** Complete MACD calculation */
+/**
+ * MACD (12, 26, 9)
+ * Available from 34 samples.
+ */
 export function macd(
   closes: number[],
   fastPeriod = 12,
@@ -101,7 +111,7 @@ export function macd(
   signalLine: number | null;
   histogram: number | null;
 } {
-  if (closes.length < slowPeriod + signalPeriod) {
+  if (closes.length < slowPeriod + signalPeriod - 1) {
     return { macdLine: null, signalLine: null, histogram: null };
   }
 
@@ -136,12 +146,10 @@ export function macd(
   };
 }
 
-/** MACD histogram (12, 26, 9) */
-export function macdHistogram(closes: number[]): number | null {
-  return macd(closes).histogram;
-}
-
-/** Commodity Channel Index */
+/**
+ * Commodity Channel Index (CCI)
+ * Zero mean deviation returns 0.
+ */
 export function cci(
   highs: number[],
   lows: number[],
@@ -152,14 +160,17 @@ export function cci(
   const tps = closes.map((c, i) => (highs[i] + lows[i] + c) / 3);
   const slice = tps.slice(-period);
   const mean = slice.reduce((a, b) => a + b, 0) / period;
-  const meanDev =
-    slice.reduce((a, b) => a + Math.abs(b - mean), 0) / period;
+  const meanDev = slice.reduce((a, b) => a + Math.abs(b - mean), 0) / period;
+
   if (meanDev === 0) return 0;
   const currentTp = tps[tps.length - 1];
   return (currentTp - mean) / (0.015 * meanDev);
 }
 
-/** Williams %R */
+/**
+ * Williams %R
+ * Zero range returns -50.
+ */
 export function williamsR(
   highs: number[],
   lows: number[],
@@ -176,12 +187,26 @@ export function williamsR(
   return ((highest - closes[closes.length - 1]) / range) * -100;
 }
 
-/** Extract series from candles */
-export function extractSeries(candles: Candle[]) {
+/**
+ * Compute all 6 technical indicator values from a candle array.
+ */
+export function computeIndicators(candles: Candle[]): IndicatorValues {
+  const closes = candles.map((c) => c.close);
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+
+  const stoch = stochastic(highs, lows, closes, 14, 3);
+  const macdVal = macd(closes, 12, 26, 9);
+
   return {
-    closes: candles.map((c) => c.close),
-    highs: candles.map((c) => c.high),
-    lows: candles.map((c) => c.low),
-    volumes: candles.map((c) => c.volume),
+    rsi: rsi(closes, 14),
+    cci: cci(highs, lows, closes, 20),
+    macdHist: macdVal.histogram,
+    macdLine: macdVal.macdLine,
+    signalLine: macdVal.signalLine,
+    stochK: stoch.k,
+    stochD: stoch.d,
+    willR: williamsR(highs, lows, closes, 14),
+    lorentzianPrediction: null,
   };
 }
