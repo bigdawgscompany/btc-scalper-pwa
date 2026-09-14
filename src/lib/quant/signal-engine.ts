@@ -14,6 +14,8 @@ import type {
   TrendBias,
 } from "./types";
 
+const NAN = Number.NaN;
+
 function finite(...values: number[]): boolean {
   return values.every(Number.isFinite);
 }
@@ -104,11 +106,10 @@ export function evaluateSignal(input: SignalEngineInput): SignalDecision {
   criteria.push(criterion("vwap-side", "VWAP side", vwapScore,
     vwapScore > 0 ? "Close above UTC-session VWAP" : vwapScore < 0 ? "Close below UTC-session VWAP" : "VWAP unavailable"));
 
-  const volumeWindowStart = Math.max(0, index - 19);
   let volumeSum = 0;
   let volumeCount = 0;
-  for (let i = volumeWindowStart; i <= index; i += 1) {
-    if (Number.isFinite(input.candles[i].volume)) {
+  for (let i = index - 20; i < index; i += 1) {
+    if (i >= 0 && Number.isFinite(input.candles[i].volume)) {
       volumeSum += input.candles[i].volume;
       volumeCount += 1;
     }
@@ -121,7 +122,7 @@ export function evaluateSignal(input: SignalEngineInput): SignalDecision {
     ? obv > obvPrev ? 1 : obv < obvPrev ? -1 : 0
     : 0;
   criteria.push(criterion("volume-obv", "Volume spike + OBV", volumeScore,
-    !volumeSpike ? "Volume is not >1.5×20-bar average" : volumeScore > 0 ? "Volume spike with rising OBV" : volumeScore < 0 ? "Volume spike with falling OBV" : "Volume spike but OBV neutral"));
+    !volumeSpike ? "Volume is not >1.5× preceding 20-bar average" : volumeScore > 0 ? "Volume spike with rising OBV" : volumeScore < 0 ? "Volume spike with falling OBV" : "Volume spike but OBV neutral"));
 
   const rsi = indicators.rsi14[index];
   const k = indicators.stochRsi.k[index];
@@ -146,10 +147,11 @@ export function evaluateSignal(input: SignalEngineInput): SignalDecision {
           ? "SHORT"
           : "NEUTRAL";
 
-  const atr = indicators.atr14[index];
+  const atrValue = indicators.atr14[index];
+  if (!Number.isFinite(atrValue) || atrValue <= 0) throw new Error("ATR14 unavailable for risk levels");
   const entry = candle.close;
-  const stopLoss = direction === "LONG" ? entry - 1.5 * atr : direction === "SHORT" ? entry + 1.5 * atr : entry;
-  const takeProfit = direction === "LONG" ? entry + 3 * atr : direction === "SHORT" ? entry - 3 * atr : entry;
+  const stopLoss = direction === "LONG" ? entry - 1.5 * atrValue : direction === "SHORT" ? entry + 1.5 * atrValue : entry;
+  const takeProfit = direction === "LONG" ? entry + 3 * atrValue : direction === "SHORT" ? entry - 3 * atrValue : entry;
 
   return {
     direction,
