@@ -94,8 +94,8 @@ export function computeSupertrend(
 
   for (let i = 0; i < n; i++) {
     const src = (candles[i].high + candles[i].low) / 2;
-    let basicUp = src - cfg.multiplier * atr[i];
-    let basicDn = src + cfg.multiplier * atr[i];
+    const basicUp = src - cfg.multiplier * atr[i];
+    const basicDn = src + cfg.multiplier * atr[i];
 
     if (i === 0) {
       up = basicUp;
