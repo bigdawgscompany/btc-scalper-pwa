@@ -78,10 +78,10 @@ describe("quant indicators", () => {
     const bb = bollinger(series.map((c) => c.close), 20, 2);
     const st = supertrend(series, 10, 3);
     const sr = stochRsi(rsi(series.map((c) => c.close), 14), 14, 3, 3);
-    expect(a[30]).toBeFinite();
-    expect(bb.middle[30]).toBeFinite();
-    expect(st.value[30]).toBeFinite();
-    expect(sr.k[40]).toBeFinite();
-    expect(sr.d[40]).toBeFinite();
+    expect(Number.isFinite(a[30])).toBe(true);
+    expect(Number.isFinite(bb.middle[30])).toBe(true);
+    expect(Number.isFinite(st.value[30])).toBe(true);
+    expect(Number.isFinite(sr.k[40])).toBe(true);
+    expect(Number.isFinite(sr.d[40])).toBe(true);
   });
 });
