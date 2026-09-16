@@ -46,8 +46,8 @@ let dbInstance: ScalperDatabase | null = null;
 
 /** Return the singleton IndexedDB wrapper for the browser session. */
 export function getDatabase(): ScalperDatabase {
-  if (typeof window === "undefined") {
-    throw new Error("IndexedDB is only accessible in browser environment.");
+  if (typeof indexedDB === "undefined") {
+    throw new Error("IndexedDB is unavailable in this runtime.");
   }
   if (!dbInstance) {
     dbInstance = new ScalperDatabase();

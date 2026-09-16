@@ -351,7 +351,7 @@ describe("Paper engine — open position", () => {
 describe("Paper engine — reversal integrity", () => {
   it("records EXIT_OPPOSITE when replacement entry fails", () => {
     const config = {
-      startingBalance: "100.00",
+      startingBalance: "10.01",
       entryAllocationPct: 100,
       stopLossPct: 1,
       takeProfitPct: 2,
@@ -387,7 +387,7 @@ describe("Paper engine — reversal integrity", () => {
     const result = evaluateAutopilotCycle(
       opened,
       bearish,
-      makeQuote(80, 80.1)
+      makeQuote(99.2, 99.3)
     );
     expect(result.updatedAccount.position).toBeNull();
     expect(result.decision.action).toBe("EXIT_OPPOSITE");
